@@ -12,7 +12,13 @@ from src.pupil_detection import detect_pupil
 from src.eye_tracking import EyeTracker
 from src.feature_extraction import extract_features
 from src.feature_fusion import fuse_features
-from src.visualization import draw_on_frame, save_diagnostic_crops, save_gaze_path_plot, save_feature_fusion_plots
+from src.visualization import (
+    draw_on_frame,
+    save_diagnostic_crops,
+    save_gaze_path_plot,
+    save_feature_fusion_plots,
+    save_grayscale_and_gradient_images
+)
 
 logger = setup_logging()
 
@@ -41,6 +47,9 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
     frame_idx = 0
     start_time = time.time()
     last_annotated = None
+    last_eye_regions = None
+    last_frame = None
+    first_detection = True
     
     logger.info(f"Pipeline running. Input source: {source}. Method: {method}. Synthetic fallback active: {is_synthetic}")
     
@@ -57,6 +66,7 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
                 break
                 
             frame_idx += 1
+            last_frame = frame.copy()
             
             # A. Detect Face
             face_bbox, face_details = face_detector.detect(frame, is_synthetic=is_synthetic)
@@ -64,6 +74,11 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
             # B. Detect & Crop Eyes
             eye_regions = eye_detector.detect_and_crop(frame, face_bbox, face_details, is_synthetic=is_synthetic)
             
+            if not eye_regions and frame is not None and frame.size > 0:
+                h, w = frame.shape[:2]
+                crop_dict = {'img': frame.copy(), 'bbox': (0, 0, w, h)}
+                eye_regions = {'left_eye': crop_dict, 'right_eye': crop_dict}
+                
             if eye_regions:
                 # Process Left and Right eyes
                 for eye_key in ['left_eye', 'right_eye']:
@@ -94,9 +109,12 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
                 annotated = draw_on_frame(frame, eye_regions, record)
                 last_annotated = annotated.copy()
                 
-                # Store sample crops on frame 30 or first frame for report diagnostics
-                if frame_idx == 30 or (frame_idx == 1 and not last_annotated is None):
+                # Store sample crops on first detection or frame 30 for instant preview
+                if first_detection or frame_idx == 30:
                     save_diagnostic_crops(eye_regions, results_dir)
+                    first_detection = False
+                    
+                last_eye_regions = eye_regions
             else:
                 record = tracker.track(frame_idx, {})
                 annotated = frame.copy()
@@ -112,12 +130,23 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
                     logger.info("User requested exit ('q' key pressed).")
                     break
                     
+    except KeyboardInterrupt:
+        logger.info("User stopped tracking with KeyboardInterrupt (Ctrl+C).")
     except Exception as e:
         logger.error(f"Error occurred during frame processing loop: {e}", exc_info=True)
     finally:
         capture.release()
         face_detector.close()
         if show_preview:
+            cv2.destroyAllWindows()
+            
+        # Ensure images are saved even on early exit/interrupt
+        if last_eye_regions is not None or last_frame is not None:
+            try:
+                save_grayscale_and_gradient_images(last_eye_regions, last_frame, base_dir)
+                logger.info("Saved grayscale and color gradient images for captured frames.")
+            except Exception as e:
+                logger.warning(f"Could not save images on cleanup: {e}")
             cv2.destroyAllWindows()
             
     # --- Post Processing & Diagnostics Generation ---
@@ -184,6 +213,23 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
             
         shutil.copy(gaze_path_img, os.path.join(base_dir, 'data', 'output', 'gaze_path', f'fig7_gaze_path_{timestamp}.png'))
         shutil.copy(feat_fusion_img, os.path.join(base_dir, 'data', 'output', 'feature_plots', f'fig8_feature_fusion_{timestamp}.png'))
+        
+        # Copy 3D Supplementary Figures & Interactive HTML
+        g3d = os.path.join(results_dir, 'fig7_gaze_path_3d.png')
+        if os.path.exists(g3d):
+            shutil.copy(g3d, os.path.join(base_dir, 'data', 'output', 'gaze_path', f'fig7_gaze_path_3d_{timestamp}.png'))
+        g3d_h = os.path.join(results_dir, 'fig7_gaze_path_3d.html')
+        if os.path.exists(g3d_h):
+            shutil.copy(g3d_h, os.path.join(base_dir, 'data', 'output', 'gaze_path', f'fig7_gaze_path_3d_{timestamp}.html'))
+            
+        f3d = os.path.join(results_dir, 'fig8_feature_fusion_3d.png')
+        if os.path.exists(f3d):
+            shutil.copy(f3d, os.path.join(base_dir, 'data', 'output', 'feature_plots', f'fig8_feature_fusion_3d_{timestamp}.png'))
+        f3d_h = os.path.join(results_dir, 'fig8_feature_fusion_3d.html')
+        if os.path.exists(f3d_h):
+            shutil.copy(f3d_h, os.path.join(base_dir, 'data', 'output', 'feature_plots', f'fig8_feature_fusion_3d_{timestamp}.html'))
+        
+        save_grayscale_and_gradient_images(last_eye_regions, last_frame, base_dir, timestamp=timestamp)
         
         logger.info(f"Successfully archived final report and curves to data/output/ with timestamp {timestamp}.")
     except Exception as e:

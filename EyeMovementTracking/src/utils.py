@@ -29,9 +29,13 @@ def setup_directories():
         os.path.join(base_dir, 'data', 'output', 'denoised'),
         os.path.join(base_dir, 'data', 'output', 'gaze_path'),
         os.path.join(base_dir, 'data', 'output', 'feature_plots'),
+        os.path.join(base_dir, 'data', 'output', 'grayscale'),
+        os.path.join(base_dir, 'data', 'output', 'color_gradient'),
         os.path.join(base_dir, 'data', 'output', 'reports'),
         os.path.join(base_dir, 'models'),
-        os.path.join(base_dir, 'results')
+        os.path.join(base_dir, 'results'),
+        os.path.join(base_dir, 'results', 'grayscale'),
+        os.path.join(base_dir, 'results', 'color_gradient')
     ]
     for directory in directories:
         os.makedirs(directory, exist_ok=True)

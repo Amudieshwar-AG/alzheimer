@@ -3,6 +3,7 @@ import numpy as np
 import math
 import random
 import logging
+import os
 
 logger = logging.getLogger('EyeTracking')
 
@@ -41,22 +42,54 @@ class EyeTrackingCapture:
         if source == "webcam" or source == "0" or str(source).isdigit():
             idx = 0 if source == "webcam" else int(source)
             logger.info(f"Initializing webcam index {idx}...")
-            self.cap = cv2.VideoCapture(idx)
+            
+            # Try DirectShow API for robust Windows camera access
+            self.cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
             if not self.cap.isOpened():
-                logger.warning(f"Failed to open webcam {idx}. Falling back to synthetic generator.")
-                self.is_synthetic = True
+                self.cap = cv2.VideoCapture(idx)
+                
+            if not self.cap.isOpened() and idx == 0:
+                logger.info("Retrying camera index 1 with CAP_DSHOW...")
+                self.cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
+                if not self.cap.isOpened():
+                    self.cap = cv2.VideoCapture(1)
+                    
+            if not self.cap.isOpened():
+                logger.error(f"Failed to open webcam index {idx}. Camera permission might be blocked or camera is in use.")
+                raise RuntimeError(
+                    f"Could not open webcam (index {idx}). Please ensure your camera is connected, "
+                    "permissions are enabled in Windows settings, and no other app (like Zoom or Teams) is using it."
+                )
             else:
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                self.is_synthetic = False
         elif source == "demo" or source == "synthetic":
             logger.info("Initializing synthetic eye movement generator...")
             self.is_synthetic = True
         else:
-            logger.info(f"Opening video file source: {source}...")
-            self.cap = cv2.VideoCapture(source)
-            if not self.cap.isOpened():
-                logger.error(f"Failed to open video file {source}. Falling back to synthetic generator.")
+            if not os.path.exists(source):
+                logger.error(f"Input file '{source}' does NOT exist. Falling back to synthetic generator.")
                 self.is_synthetic = True
+                self.static_image = None
+            else:
+                ext = os.path.splitext(source)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp']:
+                    logger.info(f"Loading image file source: {source}...")
+                    img = cv2.imread(source)
+                    if img is not None:
+                        self.static_image = img
+                        self.is_synthetic = False
+                    else:
+                        logger.error(f"Could not decode image file '{source}'. Falling back to synthetic generator.")
+                        self.is_synthetic = True
+                else:
+                    logger.info(f"Opening video file source: {source}...")
+                    self.cap = cv2.VideoCapture(source)
+                    self.static_image = None
+                    if not self.cap.isOpened():
+                        logger.error(f"Failed to open video file '{source}'. Falling back to synthetic generator.")
+                        self.is_synthetic = True
                 
     def read_frame(self):
         """
@@ -66,6 +99,13 @@ class EyeTrackingCapture:
             frame = self._generate_synthetic_frame()
             return True, frame
             
+        if hasattr(self, 'static_image') and self.static_image is not None:
+            if self.frame_count > 0:
+                return False, None
+            self.frame_count += 1
+            frame = self.static_image.copy()
+            return True, frame
+
         success, frame = self.cap.read()
         if not success:
             return False, None

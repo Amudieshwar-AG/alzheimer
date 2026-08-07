@@ -23,6 +23,8 @@ EyeMovementTracking/
 │   └── output/
 │       ├── segmented/        # Output of pupil segmentation masking
 │       ├── denoised/         # Output of CLAHE/Gaussian filters
+│       ├── grayscale/        # Output grayscale images of frames & eye crops
+│       ├── color_gradient/   # Spatial intensity color gradient maps (e.g. JET/VIRIDIS)
 │       ├── gaze_path/
 │       ├── feature_plots/
 │       └── reports/          # Stores pipeline.log and copies of reports
