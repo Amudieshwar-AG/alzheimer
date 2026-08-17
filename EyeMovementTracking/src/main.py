@@ -53,6 +53,10 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
     
     logger.info(f"Pipeline running. Input source: {source}. Method: {method}. Synthetic fallback active: {is_synthetic}")
     
+    best_annotated = None
+    best_eye_regions = None
+    best_frame = None
+
     try:
         while True:
             # Check maximum frame cap (useful for automated testing)
@@ -109,6 +113,12 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
                 annotated = draw_on_frame(frame, eye_regions, record)
                 last_annotated = annotated.copy()
                 
+                # Select best frame (around frame 60 or frame 90 when eyes are open and looking at camera)
+                if best_annotated is None or (30 <= frame_idx <= 120 and frame_idx % 30 == 0):
+                    best_annotated = annotated.copy()
+                    best_eye_regions = eye_regions
+                    best_frame = frame.copy()
+
                 # Store sample crops on first detection or frame 30 for instant preview
                 if first_detection or frame_idx == 30:
                     save_diagnostic_crops(eye_regions, results_dir)
@@ -140,10 +150,11 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
         if show_preview:
             cv2.destroyAllWindows()
             
-        # Ensure images are saved even on early exit/interrupt
-        if last_eye_regions is not None or last_frame is not None:
+        target_eye_regions = best_eye_regions if best_eye_regions is not None else last_eye_regions
+        target_frame = best_frame if best_frame is not None else last_frame
+        if target_eye_regions is not None or target_frame is not None:
             try:
-                save_grayscale_and_gradient_images(last_eye_regions, last_frame, base_dir)
+                save_grayscale_and_gradient_images(target_eye_regions, target_frame, base_dir)
                 logger.info("Saved grayscale and color gradient images for captured frames.")
             except Exception as e:
                 logger.warning(f"Could not save images on cleanup: {e}")
@@ -157,9 +168,10 @@ def run_pipeline(source="webcam", method="mediapipe", max_frames=None, show_prev
         logger.error("No frames were successfully tracked. Cannot generate report.")
         return
         
-    # Save Figure 4: Video Frame annotated
-    if last_annotated is not None:
-        cv2.imwrite(os.path.join(results_dir, 'fig4_video_frame.png'), last_annotated)
+    # Save Figure 4: Video Frame annotated (using best mid-stream frame when user looked at camera)
+    frame_to_save = best_annotated if best_annotated is not None else last_annotated
+    if frame_to_save is not None:
+        cv2.imwrite(os.path.join(results_dir, 'fig4_video_frame.png'), frame_to_save)
         logger.info("Saved Figure 4 (video frame annotated).")
         
     # Extract Features
